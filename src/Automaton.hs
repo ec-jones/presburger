@@ -1,4 +1,4 @@
-module Automata where
+module Automaton where
 
 import Data.List (subsequences, (\\))
 
@@ -15,7 +15,7 @@ data Automaton q = Automaton
 equation :: Automaton Bool
 equation =
   Automaton
-    { states = [False, True], -- carry?
+    { states = [False, True], -- carry
       dim = 3,
       delta = \q ->
         if q
@@ -33,6 +33,24 @@ equation =
             ],
       start = False,
       final = [False]
+    }
+
+zeros, ones :: Int -> Automaton ()
+zeros n =
+  Automaton
+    { states = [()],
+      dim = n,
+      delta = \_ -> [(replicate n False, ())],
+      start = (),
+      final = [()]
+    }
+ones n =
+  Automaton
+    { states = [()],
+      dim = n,
+      delta = \_ -> [(replicate n True, ())],
+      start = (),
+      final = [()]
     }
 
 -- Check if every transition is unique
