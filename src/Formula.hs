@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 
 module Formula where
@@ -7,7 +8,7 @@ data Term a
   | Zero
   | One
   | Add (Term a) (Term a)
-  deriving (Eq, Functor)
+  deriving (Eq, Functor, Foldable)
 
 data Formula a
   = Equals (Term a) (Term a) -- The atomic formulae
@@ -17,39 +18,37 @@ data Formula a
   | Not (Formula a)
   | Forall a (Formula a)
   | Exists a (Formula a)
-  deriving (Eq, Functor)
+  deriving (Eq, Functor, Foldable)
 
 -- Turn a term into a formula and a variable which has the same value
--- xs is a list of fresh variables
-termToVar :: Term a -> [a] -> ([a], Formula a, a)
-termToVar (Var x) xs = (xs, Top, x)
-termToVar Zero (x : xs) = (xs, Exists x (Equals (Var x) Zero), x)
-termToVar One (x : xs) = (xs, Exists x (Equals (Var x) One), x)
-termToVar (Add t1 t2) (z : xs) =
-  let (xs', fy, x) = termToVar t1 xs
-      (xs'', fx, y) = termToVar t2 xs'
-   in (xs'', Exists z (And fx (And fy (Equals (Add (Var x) (Var y)) (Var z)))), z)
-termToVar _ _ = error "Insufficient fresh variables!"
+-- x is the next fresh variables
+termToVar :: Term Int -> Int -> (Int, Formula Int, Int)
+termToVar (Var x) y = (y, Top, x)
+termToVar Zero x = (x + 1, Exists x (Equals (Var x) Zero), x)
+termToVar One x = (x + 1, Exists x (Equals (Var x) One), x)
+termToVar (Add t1 t2) x =
+  let (x', p, y) = termToVar t1 (x + 1)
+      (x'', q, z) = termToVar t2 x'
+   in (x'', Exists x (And p (And q (Equals (Add (Var y) (Var z)) (Var x)))), z)
 
 -- Convert all atoms to one of the forms: x + y = z, x = 0, or y = 1
-normalise :: Formula a -> [a] -> ([a], Formula a)
-normalise Top xs = (xs, Top)
-normalise (Equals t1 t2) (z : xs) =
-  let (xs', p, x) = termToVar t1 xs
-      (xs'', q, y) = termToVar t2 xs'
-   in (xs'', Exists z (And (Equals (Add (Var x) (Var y)) (Var z)) (And p q)))
-normalise (And p q) xs =
-  let (xs', p') = normalise p xs
-      (xs'', q') = normalise q xs'
-   in (xs'', And p' q')
-normalise (Or p q) xs =
-  let (xs', p') = normalise p xs
-      (xs'', q') = normalise q xs'
-   in (xs'', Or p' q')
-normalise (Not p) xs = Not <$> normalise p xs
-normalise (Forall x p) xs = Forall x <$> normalise p xs
-normalise (Exists x p) xs = Exists x <$> normalise p xs
-normalise _ _ = error "Insufficient fresh variables!"
+normalise :: Formula Int -> Int -> (Int, Formula Int)
+normalise Top x = (x, Top)
+normalise (Equals t1 t2) x =
+  let (x', p, y) = termToVar t1 (x + 1)
+      (x'', q, z) = termToVar t2 x'
+   in (x'', Exists x (And p (And q (Equals (Add (Var y) (Var z)) (Var x)))))
+normalise (And p q) x =
+  let (x', p') = normalise p x
+      (x'', q') = normalise q x'
+   in (x'', And p' q')
+normalise (Or p q) x =
+  let (x', p') = normalise p x
+      (x'', q') = normalise q x'
+   in (x'', Or p' q')
+normalise (Not p) x = fmap Not (normalise p x)
+normalise (Forall x p) y = fmap (Forall x) (normalise p y)
+normalise (Exists x p) y = fmap (Exists x) (normalise p y)
 
 -- Rename the variables in a term
 rename :: (Eq a, Functor f) => [(a, b)] -> f a -> f b
@@ -115,3 +114,8 @@ prenex (Not p) =
     p' -> Not p'
 prenex (Forall x p) = Forall x (prenex p)
 prenex (Exists x p) = Exists x (prenex p)
+
+preprocess :: Formula String -> Formula Int
+preprocess p =
+  let p' = prenex (standardise p)
+   in snd (normalise p' (maximum p'))
