@@ -37,7 +37,7 @@ normalise Top x = (x, Top)
 normalise (Equals t1 t2) x =
   let (x', p, y) = termToVar t1 (x + 1)
       (x'', q, z) = termToVar t2 x'
-   in (x'', Exists x (And p (And q (Equals (Add (Var y) (Var z)) (Var x)))))
+   in (x'', Exists x (And p (And q (And (Equals (Var x) Zero) (Equals (Add (Var y) (Var z)) (Var z))))))
 normalise (And p q) x =
   let (x', p') = normalise p x
       (x'', q') = normalise q x'
