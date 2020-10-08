@@ -11,6 +11,7 @@ data Term a
 
 data Formula a
   = Equals (Term a) (Term a) -- The atomic formulae
+  | Top
   | And (Formula a) (Formula a)
   | Or (Formula a) (Formula a)
   | Not (Formula a)
@@ -18,23 +19,37 @@ data Formula a
   | Exists a (Formula a)
   deriving (Eq, Functor)
 
--- -- Convert addition term into a variable with a supply of fresh variables
--- add :: Term a -> Term a -> [a] -> (Maybe (Formula a), a)
--- add (Var x) (Var y) = (Just (Exists z (Equals (Add (Var x) (Var y)) z)), z)
--- add (Var x) Zero = (Nothing, x)
--- add (Var x) One = (Just (Exists z (Exists y (And (Equals (Add (Var x) (Var y)) z) (Equals y One)))), z)
--- add (Var x) (Add y z) =
---   let (p, w) = add y z
---   in (Just (Exists v (And (Equals (Add (Var x) (Var w)) v) p)), v)
+-- Turn a term into a formula and a variable which has the same value
+-- xs is a list of fresh variables
+termToVar :: Term a -> [a] -> ([a], Formula a, a)
+termToVar (Var x) xs = (xs, Top, x)
+termToVar Zero (x : xs) = (xs, Exists x (Equals (Var x) Zero), x)
+termToVar One (x : xs) = (xs, Exists x (Equals (Var x) One), x)
+termToVar (Add t1 t2) (z : xs) =
+  let (xs', fy, x) = termToVar t1 xs
+      (xs'', fx, y) = termToVar t2 xs'
+   in (xs'', Exists z (And fx (And fy (Equals (Add (Var x) (Var y)) (Var z)))), z)
+termToVar _ _ = error "Insufficient fresh variables!"
 
--- -- Smart constructor for equality
--- equals :: Term a -> Term a -> Formula a
--- equals z Zero = Equals z Zero
--- equals z One = Equals z One
--- equals z (Add (Var x) (Var y)) = Equals (Add (Var x) (Var y)) z
--- equals z (Add Zero y) = Equals z y
--- equals z (Add x Zero) = Equals z x
--- equals z (Add x y) = _
+-- Convert all atoms to one of the forms: x + y = z, x = 0, or y = 1
+normalise :: Formula a -> [a] -> ([a], Formula a)
+normalise Top xs = (xs, Top)
+normalise (Equals t1 t2) (z : xs) =
+  let (xs', p, x) = termToVar t1 xs
+      (xs'', q, y) = termToVar t2 xs'
+   in (xs'', Exists z (And (Equals (Add (Var x) (Var y)) (Var z)) (And p q)))
+normalise (And p q) xs =
+  let (xs', p') = normalise p xs
+      (xs'', q') = normalise q xs'
+   in (xs'', And p' q')
+normalise (Or p q) xs =
+  let (xs', p') = normalise p xs
+      (xs'', q') = normalise q xs'
+   in (xs'', Or p' q')
+normalise (Not p) xs = Not <$> normalise p xs
+normalise (Forall x p) xs = Forall x <$> normalise p xs
+normalise (Exists x p) xs = Exists x <$> normalise p xs
+normalise _ _ = error "Insufficient fresh variables!"
 
 -- Rename the variables in a term
 rename :: (Eq a, Functor f) => [(a, b)] -> f a -> f b
@@ -51,6 +66,7 @@ standardise :: Formula String -> Formula Int
 standardise = snd . go []
   where
     go :: [(String, Int)] -> Formula String -> ([(String, Int)], Formula Int)
+    go m Top = (m, Top)
     go m (Equals x y) = (m, Equals (rename m x) (rename m y))
     go m (And p q) =
       let (m', p') = go m p
@@ -76,6 +92,7 @@ standardise = snd . go []
 
 -- Convert a standardised formula to prenex normal form
 prenex :: Formula a -> Formula a
+prenex Top = Top
 prenex (Equals x y) = Equals x y
 prenex (And p q) =
   case (prenex p, prenex q) of
