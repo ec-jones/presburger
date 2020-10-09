@@ -26,7 +26,7 @@ parseFormula s =
 formulaDef :: LanguageDef a
 formulaDef =
   emptyDef
-    { reservedOpNames = ["+", "¬", "/\\", "\\/", "="],
+    { reservedOpNames = ["+", "¬", "/\\", "\\/", "=", "."],
       reservedNames = ["forall", "exists"]
     }
 
@@ -73,13 +73,23 @@ formula =
     exists = do
       reserved "exists"
       x <- identifier
+      reservedOp "."
       return (Exists x)
     forall = do
       reserved "forall"
       x <- identifier
+      reservedOp "."
       return (Forall x)
     innerFormula =
       parens formula
+        <|>  do
+          f <- forall
+          p <- formula
+          return (f p)
+        <|>  do
+          f <- exists
+          p <- formula
+          return (f p)
         <|> ( do
                 t1 <- term
                 reservedOp "="
