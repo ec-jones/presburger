@@ -1,16 +1,15 @@
-{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 
 module Formula where
 
-import Control.Monad.State
+import Control.Monad.State (MonadState (get, put), State, evalState)
 
 data Term a
   = Var a
   | Zero
   | One
   | Add (Term a) (Term a)
-  deriving (Eq, Functor, Foldable)
+  deriving (Functor)
 
 data Formula a
   = Equals (Term a) (Term a) -- The atomic formulae
@@ -20,13 +19,11 @@ data Formula a
   | Not (Formula a)
   | Forall a (Formula a)
   | Exists a (Formula a)
-  deriving (Eq, Functor, Foldable)
 
 preprocess :: Formula String -> Formula Int
 preprocess p =
   evalState
-    (
-        prenex <$> (standardise p >>= normalise)
+    ( prenex <$> (standardise p >>= normalise)
     )
     ([], 0)
 
@@ -54,7 +51,7 @@ addToScope x x' = do
   put ((x, x') : m, max y x')
 
 -- Rename the variables in a term
-rename :: Functor f => f String -> Scope (f Int)
+rename :: Term String -> Scope (Term Int)
 rename t = do
   (m, _) <- get
   return
