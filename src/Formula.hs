@@ -3,6 +3,8 @@
 
 module Formula where
 
+import Control.Monad.State
+
 data Term a
   = Var a
   | Zero
@@ -20,74 +22,118 @@ data Formula a
   | Exists a (Formula a)
   deriving (Eq, Functor, Foldable)
 
--- Turn a term into a formula and a variable which has the same value
--- x is the next fresh variables
-termToVar :: Term Int -> Int -> (Int, Formula Int, Int)
-termToVar (Var x) y = (y, Top, x)
-termToVar Zero x = (x + 1, Exists x (Equals (Var x) Zero), x)
-termToVar One x = (x + 1, Exists x (Equals (Var x) One), x)
-termToVar (Add t1 t2) x =
-  let (x', p, y) = termToVar t1 (x + 1)
-      (x'', q, z) = termToVar t2 x'
-   in (x'', Exists x (And p (And q (Equals (Add (Var y) (Var z)) (Var x)))), z)
+preprocess :: Formula String -> Formula Int
+preprocess p =
+  evalState
+    (
+        prenex <$> (standardise p >>= normalise)
+    )
+    ([], 0)
 
--- Convert all atoms to one of the forms: x + y = z, x = 0, or y = 1
-normalise :: Formula Int -> Int -> (Int, Formula Int)
-normalise Top x = (x, Top)
-normalise (Equals t1 t2) x =
-  let (x', p, y) = termToVar t1 (x + 1)
-      (x'', q, z) = termToVar t2 x'
-   in (x'', Exists x (And p (And q (And (Equals (Var x) Zero) (Equals (Add (Var y) (Var z)) (Var z))))))
-normalise (And p q) x =
-  let (x', p') = normalise p x
-      (x'', q') = normalise q x'
-   in (x'', And p' q')
-normalise (Or p q) x =
-  let (x', p') = normalise p x
-      (x'', q') = normalise q x'
-   in (x'', Or p' q')
-normalise (Not p) x = fmap Not (normalise p x)
-normalise (Forall x p) y = fmap (Forall x) (normalise p y)
-normalise (Exists x p) y = fmap (Exists x) (normalise p y)
+-- Allows us to keep track of variables names, and create fresh ones
+type Scope = State ([(String, Int)], Int)
+
+fresh :: Scope Int
+fresh = do
+  (m, x) <- get
+  put (m, x + 1)
+  return x
+
+-- Record all fresh variables that a function produces
+listen :: Scope a -> Scope (a, [Int])
+listen ma = do
+  (_, x) <- get
+  a <- ma
+  (_, x') <- get
+  return (a, [x .. (x' - 1)])
+
+-- Record the standardisation of a variable
+addToScope :: String -> Int -> Scope ()
+addToScope x x' = do
+  (m, y) <- get
+  put ((x, x') : m, max y x')
 
 -- Rename the variables in a term
-rename :: (Eq a, Functor f) => [(a, b)] -> f a -> f b
-rename m =
-  fmap
-    ( \a ->
-        case lookup a m of
-          Nothing -> error "Variable not in scope!"
-          Just b -> b
+rename :: Functor f => f String -> Scope (f Int)
+rename t = do
+  (m, _) <- get
+  return
+    ( fmap
+        ( \a ->
+            case lookup a m of
+              Nothing -> error "Variable not in scope!"
+              Just b -> b
+        )
+        t
     )
 
 -- Create a unique number of variables in a sentance, i.e. a formula with no free variables
-standardise :: Formula String -> Formula Int
-standardise = snd . go []
+standardise :: Formula String -> Scope (Formula Int)
+standardise Top = return Top
+standardise (Equals x y) = do
+  x' <- rename x
+  y' <- rename y
+  return (Equals x' y')
+standardise (And p q) = do
+  p' <- standardise p
+  q' <- standardise q
+  return (And p' q')
+standardise (Or p q) = do
+  p' <- standardise p
+  q' <- standardise q
+  return (Or p' q')
+standardise (Not p) = do
+  p' <- standardise p
+  return (Not p')
+standardise (Forall x p) = do
+  x' <- fresh
+  addToScope x x'
+  p' <- standardise p
+  return (Forall x' p')
+standardise (Exists x p) = do
+  x' <- fresh
+  addToScope x x'
+  p' <- standardise p
+  return (Exists x' p')
+
+-- Turn a term into a formula and a variable which has the same value
+termToVar :: Term Int -> Scope (Formula Int, Int)
+termToVar t = do
+  ((p, y), xs) <- listen (go t)
+  return (foldr Exists p xs, y)
   where
-    go :: [(String, Int)] -> Formula String -> ([(String, Int)], Formula Int)
-    go m Top = (m, Top)
-    go m (Equals x y) = (m, Equals (rename m x) (rename m y))
-    go m (And p q) =
-      let (m', p') = go m p
-          (m'', q') = go m' q
-       in (m'', And p' q')
-    go m (Or p q) =
-      let (m', p') = go m p
-          (m'', q') = go m' q
-       in (m'', Or p' q')
-    go m (Not p) =
-      let (m', p') = go m p
-       in (m', Not p')
-    go m (Forall x p) =
-      let fresh = maximum (map snd m) + 1
-          m' = (x, fresh) : m
-          (m'', p') = go m' p
-       in (m'', Forall fresh p')
-    go m (Exists x p) =
-      let fresh = maximum (map snd m) + 1
-          m' = (x, fresh) : m
-          (m'', p') = go m' p
-       in (m'', Exists fresh p')
+    go (Var x) = return (Top, x)
+    go Zero = do
+      x <- fresh
+      return (Equals (Var x) Zero, x)
+    go One = do
+      x <- fresh
+      return (Equals (Var x) One, x)
+    go (Add t1 t2) = do
+      (p, x) <- go t1
+      (q, y) <- go t2
+      z <- fresh
+      return (And p (And q (Equals (Add (Var x) (Var y)) (Var z))), z)
+
+-- Convert all atoms to one of the forms: x + y = z, x = 0, or y = 1
+normalise :: Formula Int -> Scope (Formula Int)
+normalise Top = return Top
+normalise (Equals t1 t2) = do
+  (p, x) <- termToVar t1
+  (q, y) <- termToVar t2
+  z <- fresh
+  return (Exists z (And p (And q (And (Equals (Var x) Zero) (Equals (Add (Var y) (Var z)) (Var z))))))
+normalise (And p q) = do
+  p' <- normalise p
+  q' <- normalise q
+  return (And p' q')
+normalise (Or p q) = do
+  p' <- normalise p
+  q' <- normalise q
+  return (Or p' q')
+normalise (Not p) = fmap Not (normalise p)
+normalise (Forall x p) = fmap (Forall x) (normalise p)
+normalise (Exists x p) = fmap (Exists x) (normalise p)
 
 -- Convert a standardised formula to prenex normal form
 prenex :: Formula a -> Formula a
@@ -114,8 +160,3 @@ prenex (Not p) =
     p' -> Not p'
 prenex (Forall x p) = Forall x (prenex p)
 prenex (Exists x p) = Exists x (prenex p)
-
-preprocess :: Formula String -> Formula Int
-preprocess p =
-  let p' = prenex (standardise p)
-   in snd (normalise p' (maximum p'))
