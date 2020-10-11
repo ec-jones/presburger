@@ -165,10 +165,10 @@ complement a =
         { final = states a' \\ final a'
         }
 
--- Eliminate the top row of all vectors
-project :: Automaton -> Automaton
-project a | dim a == 0 = error "Cannot eliminate variables out of order"
-project a =
+-- Eliminate nth variables from automaton
+project :: Int -> Automaton -> Automaton
+project n a | n /= dim a + 1 = error "Cannot eliminate variables out of order"
+project _ a =
   Automaton
     { states = states a,
       dim = dim a - 1,
