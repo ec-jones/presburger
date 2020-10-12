@@ -1,14 +1,14 @@
 module Automaton where
 
-import Control.Monad (replicateM)
-import Data.List (subsequences, (\\))
+import Control.Monad
+import Data.List
 
 data State
   = On
   | Off
   | Pair State State
   | Set [State]
-  deriving (Eq)
+  deriving (Eq, Show)
 
 fromBool :: Bool -> State
 fromBool False = Off
@@ -76,6 +76,16 @@ one x =
       final = [Off, On]
     }
 
+empty :: Automaton
+empty =
+  Automaton
+    { states = [Off],
+      dim = 0,
+      delta = \q n -> [Off],
+      start = Off,
+      final = [Off]
+    }
+
 -- Check if every transition is unique
 isDeterministic :: Automaton -> Bool
 isDeterministic a = all (isFunc . delta a) (states a)
@@ -103,8 +113,8 @@ determinise a =
     }
 
 -- Check if the automaton accept any string
-empty :: Automaton -> Bool
-empty a = snd $ search (start a) []
+isEmpty :: Automaton -> Bool
+isEmpty a = snd $ search (start a) []
   where
     -- Depth-first search for to final state
     search q qs
@@ -122,8 +132,8 @@ empty a = snd $ search (start a) []
 
 intersection :: Automaton -> Automaton -> Automaton
 intersection a b =
-  let a' = antiproject (dim a) a
-      b' = antiproject (dim b) b
+  let a' = antiproject (dim b) a
+      b' = antiproject (dim a) b
    in Automaton
         { states =
             [ Pair qa qb
@@ -167,7 +177,7 @@ complement a =
 
 -- Eliminate nth variables from automaton
 project :: Int -> Automaton -> Automaton
-project n a | n /= dim a + 1 = error "Cannot eliminate variables out of order"
+project n a | n + 1 /= dim a = error "Cannot eliminate variables out of order!"
 project _ a =
   Automaton
     { states = states a,
