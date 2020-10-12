@@ -81,7 +81,7 @@ empty =
   Automaton
     { states = [Off],
       dim = 0,
-      delta = \q n -> [Off],
+      delta = \_ _ -> [Off],
       start = Off,
       final = [Off]
     }

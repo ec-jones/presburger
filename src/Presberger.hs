@@ -1,4 +1,4 @@
-module Presberger where
+module Presburger where
 
 import Automaton
 import Formula

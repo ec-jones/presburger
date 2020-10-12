@@ -1,7 +1,7 @@
 cabal-version:       >=1.10
-name:                presberger
+name:                presburger
 version:             0.1.0.0
-synopsis:            An automaton based satisfiability checker for presberger arithmetic
+synopsis:            An automaton based satisfiability checker for presburger arithmetic
 homepage:            https://github.com/eddiejones2108/presburger/
 license:             BSD3
 license-file:        LICENSE
@@ -16,7 +16,7 @@ library
   other-modules:      Automaton
                       Formula
                       Parser
-                      Presberger
+                      Presburger
   build-depends:      base >=4.13 && <4.14, containers, mtl, parsec
   ghc-options:        -Wall
                       -Wcompat
