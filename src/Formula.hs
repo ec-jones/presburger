@@ -3,6 +3,7 @@
 module Formula where
 
 import Control.Monad.State
+
 data Term a
   = Var a
   | Zero

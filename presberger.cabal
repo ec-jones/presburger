@@ -16,6 +16,7 @@ library
   other-modules:      Automaton
                       Formula
                       Parser
+                      Presberger
   build-depends:      base >=4.13 && <4.14, containers, mtl, parsec
   ghc-options:        -Wall
                       -Wcompat

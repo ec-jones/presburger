@@ -170,10 +170,21 @@ union a b =
 
 complement :: Automaton -> Automaton
 complement a =
-  let a' = determinise a
-   in a'
-        { final = states a' \\ final a'
-        }
+  Automaton
+    { states = fmap Set (subsequences (states a)),
+      dim = dim a,
+      delta = \q ns ->
+        case q of
+          Set qs ->
+            [Set (qs >>= \q' -> delta a q' ns)]
+          _ -> [],
+      start = Set [start a],
+      final =
+        [ Set qs
+          | qs <- subsequences (states a),
+            all (`notElem` final a) qs
+        ]
+    }
 
 -- Eliminate nth variables from automaton
 project :: Int -> Automaton -> Automaton
