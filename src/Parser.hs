@@ -82,17 +82,10 @@ formula =
       return (Forall x)
     innerFormula =
       parens formula
-        <|>  do
-          f <- forall
-          p <- formula
-          return (f p)
-        <|>  do
-          f <- exists
-          p <- formula
-          return (f p)
+        <|> (forall <*> formula)
+        <|> (exists <*> formula)
         <|> ( do
                 t1 <- term
                 reservedOp "="
-                t2 <- term
-                return (Equals t1 t2)
+                Equals t1 <$> term
             )

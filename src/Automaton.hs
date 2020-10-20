@@ -14,11 +14,13 @@ fromBool :: Bool -> State
 fromBool False = Off
 fromBool True = On
 
+type Delta = State -> [Bool] -> [State]
+
 -- A (non-)deterministic finite automata over bit vectors
 data Automaton = Automaton
   { states :: [State],
     dim :: Int,
-    delta :: State -> [Bool] -> [State],
+    delta :: Delta,
     start :: State,
     final :: [State]
   }
@@ -28,14 +30,14 @@ equation :: Int -> Int -> Int -> Automaton
 equation x y z =
   Automaton
     { states = [Off, On], -- to carry or not
-      dim = maximum [x + 1, y + 1, z + 1],
+      dim = maximum [x, y, z] + 1,
       delta = \q ns ->
         case q of
           Off
-            | ns !! z == (ns !! x == ns !! y) -> [fromBool (ns !! x || ns !! y)]
+            | ns !! z == (ns !! x /= ns !! y) -> [fromBool (ns !! x && ns !! y)]
             | otherwise -> []
           On
-            | ns !! z == (ns !! x /= ns !! y) -> [fromBool (ns !! x && ns !! y)]
+            | ns !! z == (ns !! x == ns !! y) -> [fromBool (ns !! x || ns !! y)]
             | otherwise -> []
           _ -> [],
       start = Off,
@@ -93,6 +95,17 @@ isDeterministic a = all (isFunc . delta a) (states a)
     isFunc :: ([Bool] -> [State]) -> Bool
     isFunc f = all (\ns -> length (f ns) == 1) (replicateM (dim a) [False, True])
 
+complete :: Automaton -> Automaton
+complete a =
+  let qs = fix [start a]
+   in a {states = qs, final = filter (`elem` final a) qs}
+  where
+    fix qs =
+      let qs' = [q' | q <- qs, ns <- replicateM (dim a) [False, True], q' <- delta a q ns]
+       in if all (`elem` states a) qs
+            then qs
+            else fix qs'
+
 -- The powet set construction
 determinise :: Automaton -> Automaton
 determinise a =
@@ -111,6 +124,13 @@ determinise a =
             any (`elem` final a) qs
         ]
     }
+
+accepts :: [[Bool]] -> Automaton -> Bool
+accepts xs a = go xs (start a)
+  where
+    go [] q = q `elem` final a
+    go (x : xs) q =
+      any (go xs) $ delta a q x
 
 -- Check if the automaton accept any string
 isEmpty :: Automaton -> Bool
