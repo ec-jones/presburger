@@ -22,4 +22,4 @@ stringToAutomaton = formulaToAutomaton . preprocess . parseFormula
 
 -- Check if the formula is true
 test :: String -> Bool
-test = accepts [] . stringToAutomaton
+test = not . isEmpty . stringToAutomaton
