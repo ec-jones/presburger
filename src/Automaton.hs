@@ -1,83 +1,116 @@
 module Automaton where
 
-import Control.Monad
+import Control.Monad.State
 import Data.List
 
-data State
-  = On
-  | Off
-  | Pair State State
-  | Set [State]
+-- The type of states
+data Q
+  = Off
+  | On
+  | Pair Q Q
+  | Set [Q]
   deriving (Eq, Show)
 
-fromBool :: Bool -> State
-fromBool False = Off
-fromBool True = On
+-- The type of alphabet symbols
+type Sigma = [Bool]
 
-type Delta = State -> [Bool] -> [State]
+-- The type of transition functions
+type Delta = Q -> Sigma -> [Q]
 
 -- A (non-)deterministic finite automata over bit vectors
 data Automaton = Automaton
-  { states :: [State],
+  { states :: [Q],
     dim :: Int,
     delta :: Delta,
-    start :: State,
-    final :: [State]
+    start :: Q,
+    final :: Q -> Bool
   }
 
--- x + y = z
-equation :: Int -> Int -> Int -> Automaton
-equation x y z =
-  Automaton
-    { states = [Off, On], -- to carry or not
-      dim = maximum [x, y, z] + 1,
-      delta = \q ns ->
+-- The automaton's alphabet
+sigma :: Automaton -> [Sigma]
+sigma a = replicateM (dim a) [False, True]
+
+-- The set of states which follow from a states q
+succs :: Automaton -> Q -> [Q]
+succs a q = sigma a >>= delta a q
+
+-- Check if an automaton accepts a particular string
+accepts :: Automaton -> [Sigma] -> Bool
+accepts a = go (start a)
+  where
+    go :: Q -> [Sigma] -> Bool
+    go q [] = final a q
+    go q (x : xs) =
+      any (`go` xs) (delta a q x)
+
+-- Check if every traxsition is unique
+isDeterministic :: Automaton -> Bool
+isDeterministic a = all (isFunc . delta a) (states a)
+  where
+    isFunc :: (Sigma -> [Q]) -> Bool
+    isFunc f = all (isSingleton . f) (sigma a)
+
+    isSingleton :: [Q] -> Bool
+    isSingleton = (== 1) . length
+
+-- Check if the automaton accept any string
+isEmpty :: Automaton -> Bool
+isEmpty a = not $ evalState (search (start a)) []
+  where
+    -- Depth-first search for to final state
+    search :: Q -> State [Q] Bool
+    search q
+      | final a q = return True
+      | otherwise = do
+        qs <- get -- The set of previously visited states
+        if q `elem` qs
+          then return False -- q has already been visited
+          else do
+            modify (q :) -- Mark q as visited
+            foldr
+              ( \q' k -> do
+                  found <- search q'
+                  if found
+                    then return True -- Exit if a final state has been reached
+                    else k
+              )
+              (return False)
+              (succs a q) -- Search every successor of q
+
+-- The power set construction
+determinise :: Automaton -> Automaton
+determinise a | isDeterministic a = a
+determinise a =
+  a
+    { states = Set <$> subsequences (states a),
+      delta = \q xs ->
         case q of
-          Off
-            | ns !! z == (ns !! x /= ns !! y) -> [fromBool (ns !! x && ns !! y)]
-            | otherwise -> []
-          On
-            | ns !! z == (ns !! x == ns !! y) -> [fromBool (ns !! x || ns !! y)]
-            | otherwise -> []
+          Set qs -> [Set (nub (qs >>= \q' -> delta a q' xs))]
           _ -> [],
-      start = Off,
-      final = [Off]
+      start = Set [start a],
+      final = \q ->
+        case q of
+          Set qs -> any (final a) qs
+          _ -> False
     }
 
--- An automaton with n set to zero or one
-zero :: Int -> Automaton
-zero x =
-  Automaton
-    { states = [Off],
-      dim = x + 1,
-      delta = \q ns ->
-        case q of
-          Off
-            | ns !! x -> [Off]
-            | otherwise -> []
-          _ -> [],
-      start = Off,
-      final = [Off]
-    }
+-- Update the set of states reachable
+trim :: Automaton -> Automaton
+trim a =
+  let qs = go [start a]
+   in a {states = qs}
+  where
+    go qs =
+      let new = nub [q' | q <- qs, xs <- sigma a, q' <- delta a q xs, q' `notElem` qs]
+       in if null new
+            then qs
+            else go (new ++ qs)
 
-one :: Int -> Automaton
-one x =
-  Automaton
-    { states = [Off, On], -- first digit
-      dim = x + 1,
-      delta = \q ns ->
-        case q of
-          On
-            | ns !! x -> [Off]
-            | otherwise -> []
-          Off
-            | ns !! x -> []
-            | otherwise -> [Off]
-          _ -> [],
-      start = On,
-      final = [Off, On]
-    }
+-----------------------------------------------------------------
+-------------------------- Combinators --------------------------
+-----------------------------------------------------------------
 
+-- The trivial automaton
 empty :: Automaton
 empty =
   Automaton
@@ -85,146 +118,139 @@ empty =
       dim = 0,
       delta = \_ _ -> [Off],
       start = Off,
-      final = [Off]
-    }
-
--- Check if every transition is unique
-isDeterministic :: Automaton -> Bool
-isDeterministic a = all (isFunc . delta a) (states a)
-  where
-    isFunc :: ([Bool] -> [State]) -> Bool
-    isFunc f = all (\ns -> length (f ns) == 1) (replicateM (dim a) [False, True])
-
-complete :: Automaton -> Automaton
-complete a =
-  let qs = fix [start a]
-   in a {states = qs, final = filter (`elem` final a) qs}
-  where
-    fix qs =
-      let qs' = [q' | q <- qs, ns <- replicateM (dim a) [False, True], q' <- delta a q ns]
-       in if all (`elem` states a) qs
-            then qs
-            else fix qs'
-
--- The powet set construction
-determinise :: Automaton -> Automaton
-determinise a =
-  Automaton
-    { states = fmap Set (subsequences (states a)),
-      dim = dim a,
-      delta = \q ns ->
+      final = \q ->
         case q of
-          Set qs ->
-            [Set (qs >>= \q' -> delta a q' ns)]
-          _ -> [],
-      start = Set [start a],
-      final =
-        [ Set qs
-          | qs <- subsequences (states a),
-            any (`elem` final a) qs
-        ]
+          Off -> True
+          _ -> False
     }
 
-accepts :: [[Bool]] -> Automaton -> Bool
-accepts xs a = go xs (start a)
-  where
-    go [] q = q `elem` final a
-    go (x : xs) q =
-      any (go xs) $ delta a q x
+-- An automaton with x set to zero or one
+zero, one :: Int -> Automaton
+zero x =
+  Automaton
+    { states = [Off],
+      dim = x + 1,
+      delta = \q xs ->
+        case q of
+          Off
+            | xs !! x -> []
+            | otherwise -> [Off]
+          _ -> [],
+      start = Off,
+      final = \q ->
+        case q of
+          Off -> True
+          _ -> False
+    }
+one x =
+  Automaton
+    { states = [Off, On], -- first digit?
+      dim = x + 1,
+      delta = \q xs ->
+        case q of
+          Off
+            | xs !! x -> []
+            | otherwise -> [Off]
+          On
+            | xs !! x -> [Off]
+            | otherwise -> []
+          _ -> [],
+      start = On,
+      final = \q ->
+        case q of
+          Off -> True
+          _ -> False
+    }
 
--- Check if the automaton accept any string
-isEmpty :: Automaton -> Bool
-isEmpty a = snd $ search (start a) []
+-- x + y = z
+equation :: Int -> Int -> Int -> Automaton
+equation x y z =
+  Automaton
+    { states = [Off, On], -- to carry or not
+      dim = maximum [x, y, z] + 1,
+      delta = \q xs ->
+        case q of
+          Off
+            | xs !! z == (xs !! x /= xs !! y) -> [fromBool (xs !! x && xs !! y)]
+            | otherwise -> []
+          On
+            | xs !! z == (xs !! x == xs !! y) -> [fromBool (xs !! x || xs !! y)]
+            | otherwise -> []
+          _ -> [],
+      start = Off,
+      final = \q ->
+        case q of
+          Off -> True
+          _ -> False
+    }
   where
-    -- Depth-first search for to final state
-    search q qs
-      | q `elem` final a = (qs, True)
-      | q `elem` qs = (qs, False) -- q has already been visited
-      | otherwise =
-        foldr
-          ( \q' (qs', found) ->
-              if found
-                then (qs', True)
-                else search q' qs'
-          )
-          (q : qs, False)
-          (replicateM (dim a) [False, True] >>= delta a q)
+    fromBool :: Bool -> Q
+    fromBool False = Off
+    fromBool True = On
 
+-- Eliminate dth variables from automaton
+project :: Int -> Automaton -> Automaton
+project d a | dim a /= d + 1 = error "Cannot eliminate variables out of order!"
+project _ a =
+  a
+    { dim = dim a - 1,
+      delta = \q xs -> extend xs >>= delta a q
+    }
+  where
+    -- The inverse of take
+    extend xs = [xs ++ [p] | p <- [False, True]]
+
+-- Extend an automaton to d bits
+antiproject :: Int -> Automaton -> Automaton
+antiproject d a | dim a >= d = a
+antiproject d a =
+  a
+    { dim = d,
+      delta = \q -> delta a q . take (dim a)
+    }
+
+-- Intersection of two languages
 intersection :: Automaton -> Automaton -> Automaton
 intersection a b =
   let a' = antiproject (dim b) a
       b' = antiproject (dim a) b
    in Automaton
-        { states =
-            [ Pair qa qb
-              | qa <- states a',
-                qb <- states b'
-            ],
+        { states = Pair <$> states a' <*> states b',
           dim = dim a',
-          delta = \q ns ->
+          delta = \q xs ->
             case q of
-              Pair qa qb ->
-                [Pair qa' qb' | qa' <- delta a' qa ns, qb' <- delta b' qb ns]
+              Pair qa qb -> Pair <$> delta a' qa xs <*> delta b' qb xs
               _ -> [],
           start = Pair (start a') (start b'),
-          final =
-            [ Pair qa qb
-              | qa <- final a',
-                qb <- final b'
-            ]
+          final = \q ->
+            case q of
+              Pair qa qb -> final a qa && final a qb
+              _ -> False
         }
 
+-- Union of two languages
 union :: Automaton -> Automaton -> Automaton
 union a b =
-  (intersection a b)
-    { final =
-        [ Pair qa qb
-          | qa <- final a,
-            qb <- states b
-        ]
-          ++ [ Pair qa qb
-               | qa <- states a,
-                 qb <- final b
-             ]
-    }
+  let a' = antiproject (dim b) a
+      b' = antiproject (dim a) b
+   in Automaton
+        { states = Pair <$> states a' <*> states b',
+          dim = dim a',
+          delta = \q xs ->
+            case q of
+              Pair qa qb -> Pair <$> delta a' qa xs <*> delta b' qb xs
+              _ -> [],
+          start = Pair (start a') (start b'),
+          final = \q ->
+            case q of
+              Pair qa qb -> final a qa || final a qb
+              _ -> False
+        }
 
+-- The automaton which accepts every string NOT found in the original
 complement :: Automaton -> Automaton
 complement a =
-  Automaton
-    { states = fmap Set (subsequences (states a)),
-      dim = dim a,
-      delta = \q ns ->
-        case q of
-          Set qs ->
-            [Set (qs >>= \q' -> delta a q' ns)]
-          _ -> [],
-      start = Set [start a],
-      final =
-        [ Set qs
-          | qs <- subsequences (states a),
-            all (`notElem` final a) qs
-        ]
-    }
-
--- Eliminate nth variables from automaton
-project :: Int -> Automaton -> Automaton
-project n a | n + 1 /= dim a = error "Cannot eliminate variables out of order!"
-project _ a =
-  Automaton
-    { states = states a,
-      dim = dim a - 1,
-      delta = \q ns -> [ns ++ [False], ns ++ [True]] >>= delta a q,
-      start = start a,
-      final = final a
-    }
-
--- Extend an automaton to n bits
-antiproject :: Int -> Automaton -> Automaton
-antiproject n a =
-  Automaton
-    { states = states a,
-      dim = max (dim a) n,
-      delta = \q ns -> delta a q (take (dim a) ns),
-      start = start a,
-      final = final a
-    }
+  let a' = determinise a
+   in a'
+        { final = not . final a'
+        }
