@@ -83,15 +83,9 @@ determinise a | isDeterministic a = a
 determinise a =
   a
     { states = Set <$> subsequences (states a),
-      delta = \q xs ->
-        case q of
-          Set qs -> [Set (nub (qs >>= \q' -> delta a q' xs))]
-          _ -> [],
+      delta = \(Set qs) xs -> [Set (nub (qs >>= \q' -> delta a q' xs))],
       start = Set [start a],
-      final = \q ->
-        case q of
-          Set qs -> any (final a) qs
-          _ -> False
+      final = \(Set qs) -> any (final a) qs
     }
 
 -- Update the set of states reachable
@@ -110,18 +104,15 @@ trim a =
 -------------------------- Combinators --------------------------
 -----------------------------------------------------------------
 
--- The trivial automaton
+-- The trivial automaton that accepts everyhthing
 empty :: Automaton
 empty =
   Automaton
     { states = [Off],
       dim = 0,
-      delta = \_ _ -> [Off],
+      delta = \Off [] -> [Off],
       start = Off,
-      final = \q ->
-        case q of
-          Off -> True
-          _ -> False
+      final = \Off -> True
     }
 
 -- An automaton with x set to zero or one
@@ -130,17 +121,9 @@ zero x =
   Automaton
     { states = [Off],
       dim = x + 1,
-      delta = \q xs ->
-        case q of
-          Off
-            | xs !! x -> []
-            | otherwise -> [Off]
-          _ -> [],
+      delta = \Off xs -> [Off | not (xs !! x)],
       start = Off,
-      final = \q ->
-        case q of
-          Off -> True
-          _ -> False
+      final = \Off -> True
     }
 one x =
   Automaton
@@ -148,13 +131,8 @@ one x =
       dim = x + 1,
       delta = \q xs ->
         case q of
-          Off
-            | xs !! x -> []
-            | otherwise -> [Off]
-          On
-            | xs !! x -> [Off]
-            | otherwise -> []
-          _ -> [],
+          Off -> [Off | not (xs !! x)]
+          On -> [Off | xs !! x],
       start = On,
       final = \q ->
         case q of
@@ -217,15 +195,9 @@ intersection a b =
    in Automaton
         { states = Pair <$> states a' <*> states b',
           dim = dim a',
-          delta = \q xs ->
-            case q of
-              Pair qa qb -> Pair <$> delta a' qa xs <*> delta b' qb xs
-              _ -> [],
+          delta = \(Pair qa qb) xs -> Pair <$> delta a' qa xs <*> delta b' qb xs,
           start = Pair (start a') (start b'),
-          final = \q ->
-            case q of
-              Pair qa qb -> final a qa && final a qb
-              _ -> False
+          final = \(Pair qa qb) -> final a' qa && final b' qb
         }
 
 -- Union of two languages
@@ -236,15 +208,9 @@ union a b =
    in Automaton
         { states = Pair <$> states a' <*> states b',
           dim = dim a',
-          delta = \q xs ->
-            case q of
-              Pair qa qb -> Pair <$> delta a' qa xs <*> delta b' qb xs
-              _ -> [],
+          delta = \(Pair qa qb) xs -> Pair <$> delta a' qa xs <*> delta b' qb xs,
           start = Pair (start a') (start b'),
-          final = \q ->
-            case q of
-              Pair qa qb -> final a qa || final a qb
-              _ -> False
+          final = \(Pair qa qb) -> final a' qa || final b' qb
         }
 
 -- The automaton which accepts every string NOT found in the original
